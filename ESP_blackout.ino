@@ -1,6 +1,6 @@
-// rev.10
+// rev.11
 // WiFiManager con configurazione WiFi via web, ping a Blynk/MacroDroid,
-// LED heartbeat, log su web/terminal, log live con AJAX + autoscroll
+// LED heartbeat, log su web/terminal con timestamp UTC, log live con AJAX + autoscroll
 // + pulsante per pulire il log + reset WiFi via D3 in qualsiasi momento
 
 #define BLYNK_TEMPLATE_ID "TMPL4pOA_QOLl"
@@ -12,6 +12,7 @@
 #include <WiFiClientSecureBearSSL.h>
 #include <WiFiManager.h>
 #include <ESP8266WebServer.h>
+#include <time.h>
 
 unsigned int counter = 0;
 
@@ -36,18 +37,29 @@ int logIndex = 0;
 // Terminal Blynk V10
 WidgetTerminal terminal(V10);
 
+// ===================== TIMESTAMP =====================
+String getTimestamp() {
+  time_t now = time(nullptr);
+  struct tm* t = gmtime(&now); // UTC
+  char buf[30];
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S UTC", t);
+  return String(buf);
+}
+
 // ===================== LOG FUNCTION =====================
 void logMessage(String msg, bool newline=true) {
+  String fullMsg = "[" + getTimestamp() + "] " + msg;
+
   if (newline) {
-    Serial.println(msg);
-    terminal.println(msg);
+    Serial.println(fullMsg);
+    terminal.println(fullMsg);
   } else {
-    Serial.print(msg);
-    terminal.print(msg);
+    Serial.print(fullMsg);
+    terminal.print(fullMsg);
   }
   terminal.flush();
 
-  logBuffer[logIndex] = msg;
+  logBuffer[logIndex] = fullMsg;
   logIndex = (logIndex + 1) % LOG_LINES;
 }
 
@@ -163,6 +175,12 @@ void setup() {
   pinMode(resetPin, INPUT_PULLUP);
 
   Serial.begin(115200);
+
+  // NTP
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  logMessage("Sincronizzazione orario NTP...");
+  while (!time(nullptr)) delay(500);
+  logMessage("Orario NTP sincronizzato");
 
   // WiFiManager
   WiFiManager wm;
