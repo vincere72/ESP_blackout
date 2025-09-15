@@ -1,9 +1,10 @@
-// rev.17
+// rev.18
 // aggiunto V4 per reset remoto board via Blynk
 // WiFiManager con configurazione WiFi via web, ping a Blynk/MacroDroid,
 // LED heartbeat, log su web/terminal con timestamp UTC, log live con AJAX + autoscroll
 // + pulsante per pulire il log + reset WiFi via D3 in qualsiasi momento
 // Ottimizzato per stabilità a lungo termine (no crash heap)
+// Nuova funzionalità: modifica intervallo ping direttamente dalla web page
 
 #define BLYNK_TEMPLATE_ID "TMPL4pOA_QOLl"
 #define BLYNK_TEMPLATE_NAME "Quickstart Template"
@@ -22,7 +23,7 @@ unsigned int counter = 0;
 char auth[] = "YwA6GjPJDiNOpxSPZI83hnV34yD3HdI-"; // Auth Token Blynk
 const char* webhook_url = "https://trigger.macrodroid.com/e069f131-c220-474c-a554-f04c090461d6/triggerBlackout";
 
-const unsigned long pingInterval = 30000; // 30s ping
+unsigned long pingIntervalMs = 30000; // default 30s
 unsigned long lastPingTime = 0;
 
 const int resetPin = D3;
@@ -104,6 +105,11 @@ void handleRoot() {
   html += "<p><b>Stato WiFi:</b> " + String(WiFi.status() == WL_CONNECTED ? "Connesso" : "Disconnesso") + "</p>";
   html += "<form action='/reset'><input type='submit' value='Reset Counter'></form>";
   html += "<form action='/wifi'><input type='submit' value='Configura WiFi'></form>";
+  html += "<h3>Modifica intervallo ping (ms)</h3>";
+  html += "<form action='/setinterval' method='POST'>";
+  html += "<input type='number' name='interval' value='" + String(pingIntervalMs) + "' min='1000'>";
+  html += "<input type='submit' value='Aggiorna'>";
+  html += "</form>";
   html += "<p><a href='/log'>Visualizza log live</a></p>";
   html += "</body></html>";
   server.send(200, "text/html", html);
@@ -171,8 +177,21 @@ void handleClearLog() {
   server.send(303);
 }
 
+void handleSetInterval() {
+  if (server.hasArg("interval")) {
+    long newInterval = server.arg("interval").toInt();
+    if (newInterval >= 1000) { // minimo 1 secondo
+      pingIntervalMs = newInterval;
+      char buf[64];
+      snprintf(buf, sizeof(buf), "Intervallo ping aggiornato a %lu ms", pingIntervalMs);
+      logMessage(buf);
+    }
+  }
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
 
-// Pulsante reset board su Blynk -> V2
+// Pulsante reset board su Blynk -> V4
 BLYNK_WRITE(V4) {
   int value = param.asInt(); // 0 = rilasciato, 1 = premuto
   if (value == 1) {
@@ -180,7 +199,6 @@ BLYNK_WRITE(V4) {
     ESP.restart();  // reset hardware della board
   }
 }
-
 
 // ===================== SETUP =====================
 void setup() {
@@ -199,7 +217,6 @@ void setup() {
   // WiFiManager
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
-
   if (!wm.autoConnect("ESP8266_Config")) {
     logMessage("Connessione WiFi fallita, riavvio...");
     ESP.restart();
@@ -219,6 +236,7 @@ void setup() {
   server.on("/log", handleLog);
   server.on("/logdata", handleLogData);
   server.on("/clearlog", handleClearLog);
+  server.on("/setinterval", HTTP_POST, handleSetInterval);
   server.begin();
   snprintf(buf, sizeof(buf), "Web server avviato su http://%s", WiFi.localIP().toString().c_str());
   logMessage(buf);
@@ -242,7 +260,7 @@ void loop() {
   else ledInterval = 200;
 
   unsigned long now = millis();
-  if (now - lastPingTime >= pingInterval) {
+  if (now - lastPingTime >= pingIntervalMs) {
     lastPingTime = now;
     sendPing();
   }
