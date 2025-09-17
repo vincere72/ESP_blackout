@@ -1,4 +1,5 @@
-// rev.18
+// rev.19
+// migliorata gestione send macrodroid
 // aggiunto V4 per reset remoto board via Blynk
 // WiFiManager con configurazione WiFi via web, ping a Blynk/MacroDroid,
 // LED heartbeat, log su web/terminal con timestamp UTC, log live con AJAX + autoscroll
@@ -79,18 +80,42 @@ void sendPing() {
   Blynk.virtualWrite(V1, 1);
   logMessage("Ping inviato a Blynk");
 
-  // Ping MacroDroid
+  // Ping MacroDroid con retry
   if (WiFi.status() == WL_CONNECTED) {
     WiFiClientSecure client;
-    client.setInsecure();
+    client.setInsecure(); // no certiﬁcati
     HTTPClient http;
-    http.begin(client, webhook_url);
-    int code = http.GET();
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%u Ping inviato a MacroDroid, HTTP code: %d", counter, code);
-    logMessage(buf);
-    counter++;
-    http.end();
+
+    bool success = false;
+    int code = -1;
+
+    for (int attempt = 1; attempt <= 3 && !success; attempt++) {
+      if (http.begin(client, webhook_url)) {
+        http.setTimeout(5000); // 5s max
+        code = http.GET();
+        if (code > 0) {
+          char buf[64];
+          snprintf(buf, sizeof(buf),
+                   "%u Ping inviato a MacroDroid (tentativo %d), HTTP code: %d",
+                   counter, attempt, code);
+          logMessage(buf);
+          success = true;
+        } else {
+          char buf[64];
+          snprintf(buf, sizeof(buf),
+                   "Errore invio a MacroDroid (tentativo %d), code: %d",
+                   attempt, code);
+          logMessage(buf);
+          delay(1000); // piccola pausa prima del retry
+        }
+        http.end();
+      } else {
+        logMessage("Errore inizializzazione HTTPClient per MacroDroid");
+      }
+    }
+
+    if (success) counter++;
+    else logMessage("Ping a MacroDroid fallito dopo 3 tentativi");
   } else {
     logMessage("WiFi non connesso: impossibile inviare ping a MacroDroid");
   }
